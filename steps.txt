@@ -1,0 +1,78 @@
+Voici la liste complète, réorganisée chronologiquement et enrichie de vos deux demandes. Les nouvelles tâches sont placées en tout début comme demandé, avec une intégration cohérente dans le flux projet.
+
+### 📘 Phase 1 : Cadrage, Gouvernance & Conception
+1. **Organiser une réunion de cadrage avec l'équipe IaaS, les owners applicatifs et les DBA pour inventorier exhaustivement les workloads, applications et SGBD à sauvegarder. Valider pour chaque charge de travail les mécanismes de cohérence des données (quiescing applicatif, sidecars de synchronisation, snapshots storage-consistent, points de cohérence transactionnelle) afin de garantir l'intégrité et la restaurabilité des données.**
+2. **Définir et formaliser la matrice RACI pour le modèle self-service via API REST :**  
+   🔹 **R (Responsible)** : Utilisateurs/Équipes applicatives → exécution des scripts, déclenchement backup/restore, validation métier post-restauration.  
+   🔹 **A (Accountable)** : Équipe Plateforme/OpenShift & Admin NetBackup → provisionnement des accès, maintenance de l'API, supervision infrastructure, garantie du RPO/RTO global.  
+   🔹 **C (Consulted)** : Sécurité/Conformité & Support Veritas → audits, gouvernance des secrets, dépannage avancé, validation des politiques de rétention.  
+   🔹 **I (Informed)** : Management IT & Équipes DR/BCP → rapports d'activité, métriques de consommation, alertes critiques.
+3. Valider la matrice de compatibilité officielle Veritas entre OpenShift (4.x) et NetBackup (10.1+/11.x) avec le plugin Kubernetes & CSI.
+4. Définir les objectifs RPO/RTO, le périmètre de sauvegarde (etcd, PVs/PVCs, namespaces, CRDs, secrets, métadonnées) et les règles de rétention conformes aux exigences métier.
+5. Cartographier l'architecture 3 AZ : placement des nœuds OpenShift, backend de stockage CSI, bande passante inter-AZ et connectivité vers l'infrastructure NetBackup.
+6. **Rédiger le DAT (Design & Architecture Document) NetBackup pour OpenShift multi-AZ : architecture HA du Master Server, placement des Media Servers & Proxies par AZ, segmentation réseau, chiffrement TLS/AES-256, intégration CSI et flux de données résilients.**
+7. **Définir les règles de dimensionnement & montée en charge : calcul du volume journalier (taux de changement 20-30%, overhead métadonnées/compression ~15%), capacité stockage cible par rétention, IOPS/throughput requis des Media Servers, bande passante réseau par AZ (≥10 Gbps recommandé), et seuils d'alerte de saturation (>80% stockage, >70% CPU proxy).**
+
+### 🏗️ Phase 2 : Déploiement Infrastructure & Intégration
+8. Déployer et configurer le Master Server NetBackup avec haute disponibilité (cluster actif/passif ou réplication synchrone) selon les standards Veritas.
+9. Provisionner et configurer les Media Servers avec des unités de stockage (disk, object storage ou bande) accessibles depuis les 3 AZ du cluster OpenShift.
+10. Installer et configurer un Proxy NetBackup dédié par AZ pour optimiser le flux de données, réduire la latence inter-AZ et respecter les politiques de souveraineté.
+11. Configurer les règles firewall, routage et DNS bidirectionnels entre OpenShift et NetBackup (ports 1556, 13724, 443/TLS, ports CSI si nécessaire).
+12. Générer, signer et distribuer les certificats TLS pour chiffrer la communication entre l'opérateur NetBackup, les proxies, le Master Server et les composants OpenShift.
+13. Vérifier la configuration d'etcd dans OpenShift : endpoints, certificats TLS, permissions et accessibilité pour les snapshots natifs.
+14. Valider l'installation du CSI driver sous-jacent et sa compatibilité avec l'intégration CSI de NetBackup.
+15. Créer un ServiceAccount dédié dans OpenShift avec ClusterRole/Role custom minimal (lecture API, accès etcd, gestion snapshots CSI) pour l'opérateur NetBackup.
+16. Configurer les NetworkPolicies OpenShift pour restreindre strictement le trafic des pods NetBackup vers l'API server, etcd, les nœuds workers et le backend de stockage.
+17. Installer l'opérateur NetBackup Kubernetes via OLM ou manifests YAML sur le cluster OpenShift.
+18. Configurer l'opérateur avec les coordonnées du Master Server, les credentials chiffrés (via OpenShift Secrets) et le mapping des unités de stockage cibles.
+19. Déployer les pods clients/proxies NetBackup dans chaque AZ (DaemonSet/StatefulSet) pour la collecte locale des données.
+20. Valider l'état de l'opérateur, la connectivité au Master Server et le bon fonctionnement des composants dans les 3 AZ.
+
+### ⚙️ Phase 3 : Configuration Politiques & Automatisation API
+21. Créer une politique NetBackup dédiée à etcd : snapshot complet quotidien, incrémental horaire, chiffrement AES-256, rétention alignée sur le RPO.
+22. Configurer des politiques pour les Persistent Volumes : intégration CSI, snapshots app-aware si nécessaire, exclusion des volumes éphémères.
+23. Définir des politiques pour les métadonnées cluster : sauvegarde de namespaces, CRDs, ConfigMaps, Secrets et configurations d'opérateurs via l'API Kubernetes.
+24. Appliquer les règles de rétention, compression, déduplication et archivage cross-AZ ou cloud selon la stratégie DR.
+25. **Développer les scripts d'automatisation via l'API REST NetBackup (NBU Web API) : déclenchement de backups namespace, vérification des jobs, et restauration ciblée dans le même cluster.**
+26. **Étendre les scripts API : restauration cross-namespace (remapping automatique de PVC, ConfigMap, Secret via `--namespace` mapping) et restauration cross-cluster (export/import de manifests + synchronisation des snapshots CSI via API ou Cloud Snapshot).**
+27. **Intégrer les scripts dans un orchestrateur (Tekton/Ansible) avec gestion des secrets, journalisation structurée, retours d'état et hooks de notification.**
+
+### 🧪 Phase 4 : Tests, Validation & Optimisation
+28. Exécuter une sauvegarde test d'etcd et vérifier dans la console NetBackup le statut, la taille, l'intégrité des checksums et la localisation des données.
+29. Tester la sauvegarde de PVs représentatifs et valider la création des snapshots CSI sous-jacents.
+30. Sauvegarder un namespace de test contenant configurations et secrets, vérifier la cohérence des métadonnées.
+31. **Valider les scripts API REST : exécution de backup namespace, restauration locale, remapping cross-namespace et export/import cross-cluster.**
+32. Analyser les logs, métriques et alertes pour identifier goulots d'étranglement, erreurs de connectivité inter-AZ ou conflits RBAC.
+33. Réaliser une restauration test d'etcd dans un environnement isolé, valider le redémarrage du control plane et la cohérence des états.
+34. Tester la restauration de PVs, le reattachement aux PVC et vérifier l'intégrité fonctionnelle des workloads associés.
+35. Exécuter une restauration complète de namespace/métadonnées et valider le redémarrage des applications, la résolution DNS interne et les politiques de sécurité.
+36. Simuler une panne AZ (cordon, drain, arrêt forcé) et tester la restauration depuis les backups disponibles dans les AZ saines.
+37. Mesurer le RTO/RPO réel, comparer aux objectifs initiaux et ajuster les politiques, fenêtres ou ressources si nécessaire.
+
+### 📦 Phase 5 : Livraison & Mise en Production
+38. Intégrer NetBackup avec la stack de monitoring OpenShift (Prometheus, Grafana ou NBU OpsCenter) pour exposer métriques de backup/restore.
+39. Configurer des alertes proactives (email, Slack, PagerDuty) pour échecs de backup, saturation stockage, latence réseau ou erreurs CSI.
+40. Automatiser les plannings de sauvegarde, la rotation des rétentions et le nettoyage des snapshots orphelins via cronJobs ou workflows NBU.
+41. Finaliser le DAT avec les retours des tests, schémas réseau validés et matrices de dimensionnement actualisées.
+42. Produire des runbooks opérationnels : procédures de backup manuel, restauration ciblée (etcd/PV/namespace), récupération après sinistre et rollback.
+43. Documenter les limitations connues, cas d'erreur fréquents, procédures de dépannage et matrices de compatibilité versionnelle.
+44. Former l'équipe d'exploitation sur la console NetBackup, l'interface OLM/OpenShift, les workflows de restauration et les bonnes pratiques DR.
+45. **Former spécifiquement les utilisateurs self-service sur l'utilisation des scripts API REST, la gestion des quotas, le remapping de ressources et les bonnes pratiques de validation post-restauration.**
+46. Obtenir la validation formelle des parties prenantes (sécurité, infra, applicatif, conformité) sur les tests, la documentation et les runbooks.
+47. Basculer vers les plannings de production, activer les rétentions définitives et verrouiller les configurations critiques (immutable backups si supporté).
+48. Transférer sécuritairement les credentials, clés de chiffrement et accès via un gestionnaire de secrets (Vault, OpenShift Secrets ou HSM).
+49. Établir le modèle de support, matrice d'escalade, calendrier des drills DR trimestriels et clôturer la livraison avec une revue post-projet (30/60/90 jours).
+
+---
+### 💡 Notes d'expert sur les ajouts :
+
+| Domaine | Recommandations techniques clés |
+|--------|--------------------------------|
+| **Réunion IaaS & Cohérence** | Pour les SGBD (PostgreSQL, MySQL, Oracle, MongoDB), exigez des sidecars de quiescing ou des hooks `preBackup`/`postRestore`. NetBackup CSI supporte les *app-aware backups* via des scripts ou des agents intégrés. Sans cela, les snapshots storage-consistent risquent de contenir des données transactionnellement incohérentes. |
+| **RACI Self-Service** | Le modèle délégué nécessite un contrôle strict : quotas par namespace, audit trail via `audit.log` OpenShift + NBU job logs, et isolation des secrets. Les utilisateurs ne doivent jamais avoir d'accès direct au Master Server ; tout passe par l'API REST avec des tokens à durée de vie limitée. |
+| **Scripts API REST** | Utilisez les endpoints `/api/v1/backup`, `/api/v1/restore` et `/api/v1/jobs`. Pour le cross-namespace, mappez les ressources via `--namespace <target>` dans la payload JSON. Le cross-cluster n'est pas natif en 1 clic : il requiert un export de manifests + synchronisation des snapshots CSI via API ou l'activation de `Cloud Snapshot Replication` si votre backend le supporte. |
+
+Souhaitez-vous que je vous fournisse :
+- Un template DAT structuré (markdown/Word) prêt à remplir ?
+- Les scripts Python/Bash d'appel API REST pour backup/restore namespace & cross-cluster ?
+- Une calculatrice Excel de dimensionnement avec formules dynamiques (IOPS, bande passante, stockage) ?

@@ -1,0 +1,123 @@
+<mxGraphModel dx="1422" dy="795" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+  <root>
+    <mxCell id="0"/>
+    <mxCell id="1" parent="0"/>
+    
+    <!-- Couche Réseau & API -->
+    <mxCell id="net_api" value="Réseau Management &amp; API Self-Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+      <mxGeometry x="20" y="20" width="780" height="60" as="geometry"/>
+    </mxCell>
+    
+    <!-- NBU Master HA -->
+    <mxCell id="nbu_master" value="NBU Master Server (HA)" style="shape=server;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+      <mxGeometry x="300" y="120" width="180" height="60" as="geometry"/>
+    </mxCell>
+    
+    <!-- AZ-1 -->
+    <mxCell id="az1" value="AZ-1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+      <mxGeometry x="40" y="220" width="220" height="380" as="geometry"/>
+    </mxCell>
+    <mxCell id="az1_master" value="OpenShift Masters (etcd/API/OLM)" style="shape=server;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+      <mxGeometry x="60" y="250" width="180" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="az1_worker" value="Worker Nodes (Pods/PVC/DB)" style="shape=server;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+      <mxGeometry x="60" y="320" width="180" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="az1_proxy" value="NBU Proxy (DaemonSet)" style="shape=component;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+      <mxGeometry x="60" y="390" width="180" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="az1_media" value="NBU Media Server 1" style="shape=server;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+      <mxGeometry x="60" y="470" width="180" height="40" as="geometry"/>
+    </mxCell>
+    
+    <!-- AZ-2 -->
+    <mxCell id="az2" value="AZ-2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+      <mxGeometry x="300" y="220" width="220" height="380" as="geometry"/>
+    </mxCell>
+    <mxCell id="az2_master" value="OpenShift Masters (etcd/API/OLM)" style="shape=server;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+      <mxGeometry x="320" y="250" width="180" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="az2_worker" value="Worker Nodes (Pods/PVC/DB)" style="shape=server;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+      <mxGeometry x="320" y="320" width="180" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="az2_proxy" value="NBU Proxy (DaemonSet)" style="shape=component;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+      <mxGeometry x="320" y="390" width="180" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="az2_media" value="NBU Media Server 2" style="shape=server;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+      <mxGeometry x="320" y="470" width="180" height="40" as="geometry"/>
+    </mxCell>
+    
+    <!-- AZ-3 -->
+    <mxCell id="az3" value="AZ-3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+      <mxGeometry x="560" y="220" width="220" height="380" as="geometry"/>
+    </mxCell>
+    <mxCell id="az3_master" value="OpenShift Masters (etcd/API/OLM)" style="shape=server;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+      <mxGeometry x="580" y="250" width="180" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="az3_worker" value="Worker Nodes (Pods/PVC/DB)" style="shape=server;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+      <mxGeometry x="580" y="320" width="180" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="az3_proxy" value="NBU Proxy (DaemonSet)" style="shape=component;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+      <mxGeometry x="580" y="390" width="180" height="40" as="geometry"/>
+    </mxCell>
+    <mxCell id="az3_media" value="NBU Media Server 3" style="shape=server;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+      <mxGeometry x="580" y="470" width="180" height="40" as="geometry"/>
+    </mxCell>
+    
+    <!-- Backend Stockage -->
+    <mxCell id="backend" value="Backend Stockage Multi-AZ (S3/Dedup Pool)" style="shape=cylinder;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+      <mxGeometry x="260" y="580" width="300" height="60" as="geometry"/>
+    </mxCell>
+    
+    <!-- Connecteurs Contrôle -->
+    <mxCell id="edge_net_master" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;dashed=1;" edge="1" parent="1" source="net_api" target="nbu_master">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_master_proxy1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;dashed=1;" edge="1" parent="1" source="nbu_master" target="az1_proxy">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_master_proxy2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;dashed=1;" edge="1" parent="1" source="nbu_master" target="az2_proxy">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_master_proxy3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;dashed=1;" edge="1" parent="1" source="nbu_master" target="az3_proxy">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    
+    <!-- Connecteurs Données -->
+    <mxCell id="edge_proxy1_media" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="az1_proxy" target="az1_media">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_proxy2_media" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="az2_proxy" target="az2_media">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_proxy3_media" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="az3_proxy" target="az3_media">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    
+    <!-- Connecteurs Backend -->
+    <mxCell id="edge_media1_backend" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="az1_media" target="backend">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_media2_backend" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="az2_media" target="backend">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    <mxCell id="edge_media3_backend" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" edge="1" parent="1" source="az3_media" target="backend">
+      <mxGeometry relative="1" as="geometry"/>
+    </mxCell>
+    
+    <!-- Annotations -->
+    <mxCell id="annot_tls" value="TLS 1.2+ / JWT &lt;24h" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="1">
+      <mxGeometry x="340" y="90" width="100" height="20" as="geometry"/>
+    </mxCell>
+    <mxCell id="annot_ctrl" value="Flux Contrôle &amp; API REST" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="1">
+      <mxGeometry x="340" y="180" width="120" height="20" as="geometry"/>
+    </mxCell>
+    <mxCell id="annot_data" value="Flux Données (Local/AZ)" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="1">
+      <mxGeometry x="80" y="430" width="120" height="20" as="geometry"/>
+    </mxCell>
+    <mxCell id="annot_replic" value="Réplication Inter-AZ / WORM" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="1">
+      <mxGeometry x="320" y="560" width="140" height="20" as="geometry"/>
+    </mxCell>
+    
+  </root>
+</mxGraphModel>

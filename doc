@@ -1,0 +1,164 @@
+# 📘 DAT – Design & Architecture Document : Sauvegarde/Restauration NetBackup sur OpenShift 3 AZ
+
+**Version :** 1.0  
+**Auteur :** [Votre Nom/Équipe]  
+**Date :** [JJ/MM/AAAA]  
+**Statut :** `[Brouillon / En revue / Validé / Baseline]`
+
+---
+
+## 1. Introduction & Objectifs
+Ce document définit l'architecture cible, les règles de dimensionnement, le modèle opérationnel et les procédures techniques pour déployer une solution de sauvegarde/restoration **Veritas NetBackup** couvrant l'intégralité d'un cluster **OpenShift 4.x déployé sur 3 Availability Zones (AZ)**.  
+**Objectifs principaux :**
+- Garantir la résilience du plan de contrôle et des données persistantes en cas de panne AZ ou sinistre.
+- Offrir un modèle **self-service** via API REST pour les équipes applicatives (backup/restore namespace, cross-namespace, cross-cluster).
+- Assurer la **cohérence transactionnelle** des bases de données et applications stateful.
+- Respecter les objectifs **RPO/RTO** validés en phase de cadrage.
+
+---
+
+## 2. Périmètre & Exclusions
+| ✅ Inclus | ❌ Exclus |
+|----------|----------|
+| `etcd` (snapshot natif TLS) | Données éphémères (`emptyDir`, logs temporaires) |
+| Persistent Volumes / PVCs (CSI app-aware) | Sauvegarde des nœuds bare-metal ou hyperviseurs |
+| Namespaces, CRDs, ConfigMaps, Secrets, RBAC | Workloads non persistants sans état métier critique |
+| Métadonnées cluster & configurations opérateurs | Sauvegarde des images container (gérée par registry) |
+
+---
+
+## 3. Architecture Cible (To-Be)
+
+### 3.1 Topologie Réseau & Connectivité Multi-AZ
+- **Segmentation :** VPC/VNet isolée pour OpenShift, réseau dédié NBU (management + data).
+- **Routage :** Symétrique entre les 3 AZ, latence inter-AZ `<5ms`, bande passante dédiée `≥10 Gbps/AZ`.
+- **Firewall & Ports :**
+  | Source → Destination | Ports | Protocole | Usage |
+  |---------------------|-------|-----------|-------|
+  | OpenShift → NBU Master/Proxy | `1556`, `13724`, `443/TLS` | TCP | API REST, contrôle, données |
+  | Proxy NBU → Media Server | `1556`, `13724` | TCP | Flux backup/restore |
+  | OpenShift → Backend Stockage | `443/TLS`, ports CSI | TCP | Snapshots, object storage |
+- **DNS :** Résolution bidirectionnelle FQDN NBU ↔ OpenShift API/Nodes.
+
+### 3.2 Déploiement NetBackup HA
+- **Master Server :** Cluster actif/passif (ou réplication synchrone DB/IDB) sur 2 sites minimum. Le 3e AZ héberge un proxy passif pour reprise sans SPOF.
+- **Media Servers :** 1 par AZ, connectés au backend de stockage multi-AZ (S3/Azure Blob/Disque haute performance).
+- **Proxies :** 1 dédié par AZ, déployé en `DaemonSet`/`StatefulSet` dans OpenShift pour collecte locale et réduction du trafic cross-AZ.
+- **Failover :** Script automatisé de bascule Master, synchronisation des certificats TLS et des bases d'images.
+
+### 3.3 Intégration OpenShift & CSI
+- **Opérateur NBU :** Déployé via OLM, namespace `netbackup-operator`, RBAC minimal (`ClusterRole` lecture API, accès etcd, gestion snapshots CSI).
+- **NetworkPolicies :** Restriction stricte du trafic pods NBU vers API server, etcd, nœuds workers et backend stockage.
+- **CSI Driver :** Validation de compatibilité Veritas CSI Plugin avec le fournisseur sous-jacent (AWS EBS, Azure Disk, GCP PD, NetApp, Pure Storage, etc.).
+
+### 3.4 Gestion de la Cohérence des Données (Coordination IaaS/DBA)
+- **Mécanismes validés en réunion cadrage :**
+  - SGBD relationnels (PostgreSQL, MySQL, Oracle) : Sidecars de quiescing ou hooks `preBackup`/`postRestore`.
+  - Bases NoSQL (MongoDB, Redis) : Snapshots storage-consistent + vérification checksum post-restore.
+  - Applications custom : Scripts de cohérence transactionnelle injectés via `VolumeSnapshotClass` CSI.
+- **Validation :** Tests de restauration avec vérification intégrité transactionnelle (checksums, logs applicatifs, requêtes de validation).
+
+---
+
+## 4. Règles de Dimensionnement & Montée en Charge
+| Paramètre | Formule / Seuil | Recommandation |
+|-----------|----------------|----------------|
+| **Capacité Stockage** | `C = (V₀ × Tc × R) + 15%`<br>`V₀`: volume initial, `Tc`: taux changement/jour (20-30%), `R`: rétention en jours | Prévoir 1.5x la capacité calculée pour pics et métadonnées |
+| **IOPS / Throughput** | `≥ 2x` le pic de backup journalier | Media Servers dimensionnés pour CPU/RAM `<70%` en charge |
+| **Bande Passante Réseau** | `≥ 10 Gbps/AZ` dédié backup | Éviter la contention cross-AZ ; proxies locaux obligatoires |
+| **Seuils d'Alerte** | Stockage `>80%`, CPU Proxy `>75%`, Latence inter-AZ `>10ms` | Déclenchement auto-scaling ou rotation proactive |
+| **Montée en Charge** | Ajout Media/Proxy par AZ si `>30%` saturation ou RTO dégradé | Architecture élastique via OLM + templates Terraform/Ansible |
+
+---
+
+## 5. Modèle Opérationnel & RACI (Self-Service API REST)
+| Rôle | Responsabilités | Accès / Outils |
+|------|----------------|----------------|
+| **R (Responsible)** : Équipes Applicatives / Utilisateurs | Exécution scripts API, déclenchement backup/restore, validation métier post-restauration, gestion quotas namespace | Scripts Python/Bash API REST, tokens JWT à durée limitée, dashboard self-service |
+| **A (Accountable)** : Équipe Plateforme / Admin NBU | Provisionnement accès, maintenance API & infra, supervision globale, garantie RPO/RTO, gestion incidents critiques | Console NBU, OLM OpenShift, Vault/HSM, monitoring centralisé |
+| **C (Consulted)** : Sécurité/Conformité & Support Veritas | Audits, gouvernance secrets, validation politiques rétention, dépannage avancé, conformité RGPD/ISO27001 | Logs audit, rapports conformité, tickets support L3 |
+| **I (Informed)** : Management IT & DR/BCP | Rapports d'activité, métriques consommation, alertes critiques, validation drills DR | Grafana/PagerDuty, rapports mensuels, revues 30/60/90j |
+
+**Gouvernance Self-Service :**
+- Quotas par namespace (stockage backup, fréquence jobs)
+- Tokens API à durée de vie courte (`<24h`), rotation automatique via Vault
+- Audit trail centralisé : `audit.log` OpenShift + NBU job logs + traces API
+
+---
+
+## 6. Politiques de Sauvegarde & Flux de Données
+| Composant | Fréquence | Type | Chiffrement | Rétention | Flux |
+|-----------|-----------|------|-------------|-----------|------|
+| `etcd` | Quotidien complet + horaire incrémental | Snapshot natif TLS | AES-256 au repos, TLS 1.2+ transit | `[À DÉFINIR]` jours | Proxy AZ → Media local → Backend |
+| PV/PVC (CSI) | Journalier app-aware | Snapshot storage + hooks quiescing | AES-256 | `[À DÉFINIR]` jours | Proxy local → Media AZ → Backend multi-AZ |
+| Métadonnées (NS, CRD, Secrets) | Quotidien via API K8s | Export manifests + secrets chiffrés | TLS 1.2+ | `[À DÉFINIR]` jours | Opérateur NBU → Master HA |
+
+**Règles applicables :** Compression activée, déduplication si backend supporté, immutabilité WORM si NBU 10.1+ activée.
+
+---
+
+## 7. Procédures de Restauration & DR
+| Scénario | Mécanisme | Outil / API | Validation |
+|----------|-----------|-------------|------------|
+| **Restore local** | Restore namespace/PV dans même cluster | `POST /api/v1/restore` + payload JSON | Vérification checksums, redémarrage pods, tests métier |
+| **Cross-Namespace** | Remapping automatique PVC/ConfigMap/Secret | `--namespace <target>` dans payload API | Validation RBAC, résolution DNS interne, cohérence secrets |
+| **Cross-Cluster** | Export manifests + sync snapshots CSI (Cloud Snapshot Replication ou API) | `GET /api/v1/backup` → import cluster cible + `POST /api/v1/restore` | Validation DR, tests fonctionnels, bascule DNS/routage |
+| **Panne AZ** | Failover Master NBU + restore depuis AZ saines | Script bascule + API REST | Mesure RTO réel, validation continuité service |
+
+**Drills DR :** Trimestriels, scénarios documentés, retours d'expérience intégrés au DAT.
+
+---
+
+## 8. Sécurité, Chiffrement & Gouvernance des Secrets
+- **Transit :** TLS 1.2+ obligatoire, certificats signés par PKI interne ou Let's Encrypt (selon politique).
+- **Repos :** AES-256, clés gérées via Vault/HSM, rotation automatique.
+- **Immutabilité :** Activation WORM/Immutable backups si version NBU et backend le supportent.
+- **RBAC OpenShift :** Least privilege, ServiceAccount dédié, NetworkPolicies restrictives.
+- **Audit :** Centralisation logs NBU + OpenShift `audit.log` → SIEM/SOAR.
+
+---
+
+## 9. Monitoring, Alerting & Reporting
+- **Intégration :** Prometheus/Grafana ou NBU OpsCenter via exporters métriques.
+- **Métriques clés :** `% succès jobs`, `durée backup/restore`, `volume traité`, `saturation stockage/CPU proxy`, `latence inter-AZ`.
+- **Alertes :** Email/Slack/PagerDuty seuils `>80%` stockage, `>75%` CPU proxy, échecs CSI, latence `>10ms`.
+- **Reporting :** Rapports hebdomadaires auto-générés, dashboard self-service utilisateurs.
+
+---
+
+## 10. Plan de Mise en Œuvre & Jalons
+| Phase | Livrables | Durée Estimée | Validation |
+|-------|-----------|---------------|------------|
+| 1. Cadrage & DAT | Inventaire IaaS, RACI, DAT validé | 2-3 semaines | Comité technique & sécurité |
+| 2. Déploiement Infra | Master HA, Media/Proxy AZ, réseau/firewall | 3-4 semaines | Tests connectivité & HA |
+| 3. Intégration OpenShift | Opérateur OLM, RBAC, NetworkPolicies, CSI | 2-3 semaines | Validation opérateur & flux |
+| 4. Scripts API & Self-Service | Dév Python/Bash, orchestrateur Tekton/Ansible | 3-4 semaines | UAT équipes applicatives |
+| 5. Tests & DR | Backup/restore local, cross-NS, cross-cluster, panne AZ | 2-3 semaines | Mesure RPO/RTO réel |
+| 6. Livraison & Go-Live | Runbooks, formation, bascule prod, revue 30/60/90j | 2 semaines | Signature parties prenantes |
+
+---
+
+## 11. Risques, Limitations & Atténuations
+| Risque | Impact | Probabilité | Atténuation |
+|--------|--------|-------------|-------------|
+| Latence inter-AZ >10ms | Dégradation RTO, saturation proxy | Moyenne | Proxies locaux par AZ, routage optimisé, QoS réseau |
+| Incohérence DB sans quiescing | Données corrompues post-restore | Élevée (si non validé) | Hooks `preBackup`/`postRestore`, validation IaaS/DBA obligatoire |
+| Complexité cross-cluster | Erreurs remapping, sync snapshots | Moyenne | Scripts API standardisés, réplication cloud snapshots, drills réguliers |
+| Saturation stockage proxy | Échecs backup, RPO non respecté | Moyenne | Dimensionnement dynamique, alertes >80%, rotation automatique |
+| Gestion tokens API self-service | Fuites secrets, accès non révoqués | Faible (si Vault) | Rotation automatique, durée <24h, audit trail centralisé |
+
+---
+
+## 📎 Annexes (À intégrer au livrable final)
+1. **Template Script API REST** (Python/Bash) : Backup namespace, restore local, cross-namespace mapping, export cross-cluster.
+2. **Matrice Ports & Firewall** : Règles détaillées source/destination, protocoles, justification.
+3. **Payload JSON Exemple** : `backup_request.json`, `restore_cross_ns.json`, `cross_cluster_sync.json`.
+4. **Checklist Validation Cohérence DB** : Hooks quiescing, checksums, requêtes de vérification post-restore.
+5. **Runbook Opérationnel** : Procédures pas-à-pas, commandes `kubectl`/NBU, rollback, contacts support.
+
+---
+✅ **Ce DAT est prêt à être complété avec vos données projet (RPO/RTO, rétentions, fournisseurs CSI, noms d'AZ, etc.).**  
+Souhaitez-vous que je vous génère :
+- Le **template Word/Markdown** formaté avec placeholders `[À COMPLÉTER]` ?
+- Les **scripts API REST complets** (Python + Bash) avec gestion d'erreurs, journalisation et remapping cross-namespace ?
+- La **calculatrice Excel de dimensionnement** avec formules dynamiques (capacité, IOPS, bande passante, seuils d'alerte) ?

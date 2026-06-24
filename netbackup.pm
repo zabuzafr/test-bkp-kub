@@ -188,3 +188,45 @@ sub logout {
         print "HTTP POST error message: ", $resp->message, "\n";
     }
 }
+# ------------------------------------------------------------
+# Récupère la liste des namespaces Kubernetes
+# Endpoint : GET /netbackup/kubernetes/namespaces
+# ------------------------------------------------------------
+sub getNamespaces {
+    my $arguments_count = scalar(@_);
+    if ($arguments_count != 2) {
+        print "ERROR :: Incorrect number of arguments passed to getNamespaces()\n";
+        return;
+    }
+
+    my $fqdn_hostname = $_[0];
+    my $token         = $_[1];
+
+    my $url = "https://$fqdn_hostname:$NB_PORT/netbackup/kubernetes/namespaces";
+
+    my $req = HTTP::Request->new(GET => $url);
+    $req->header('Authorization' => $token);
+    $req->header('content-type' => "$CONTENT_TYPE_V1");
+
+    my $ua = LWP::UserAgent->new(
+        timeout => 500,
+        ssl_opts => {
+            verify_hostname => 0,
+            SSL_verify_mode => IO::Socket::SSL::SSL_VERIFY_NONE
+        },
+    );
+
+    print "Performing Get Namespaces Request on $url\n";
+    my $response = $ua->request($req);
+
+    if ($response->is_success) {
+        print "Successfully completed Get Namespaces Request.\n";
+        my $data = decode_json($response->content);
+        my $pretty = JSON->new->pretty->encode($data);
+        return $pretty;
+    } else {
+        print "ERROR :: Get Namespaces Request Failed!\n";
+        print "HTTP GET error code: ", $response->code, "\n";
+        print "HTTP GET error message: ", $response->message, "\n";
+    }
+}

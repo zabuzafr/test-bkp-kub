@@ -1,0 +1,532 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Term::Menu;
+use JSON::PP;
+use LWP::UserAgent;
+use HTTP::Request;
+use Getopt::Long;
+use Pod::Usage;
+
+=head1 NAME
+
+k8s_backup_restore.pl - Script interactif pour restaurer des backups NetBackup vers Kubernetes
+
+=head1 SYNOPSIS
+
+./k8s_backup_restore.pl --nb-master <master> --nb-user <user> --nb-pass <pass> --kb-config <kubeconfig>
+
+=head1 DESCRIPTION
+
+Script Perl interactif pour :
+1. Lister les namespaces de backups
+2. Sélectionner et lister les backups
+3. Choisir le backup à restaurer
+4. Sélectionner le cluster Kubernetes cible
+5. Choisir le namespace cible
+
+=cut
+
+# Configuration et variables globales
+my %config = (
+    nb_master   => $ENV{NETBACKUP_MASTER} || 'localhost',
+    nb_port     => $ENV{NETBACKUP_PORT}   || 1556,
+    nb_user     => $ENV{NETBACKUP_USER}   || undef,
+    nb_pass     => $ENV{NETBACKUP_PASS}   || undef,
+    kb_config   => $ENV{KUBECONFIG}       || "$ENV{HOME}/.kube/config",
+    kb_context  => undef,
+    verbose     => 0,
+);
+
+# Parser les arguments de ligne de commande
+GetOptions(
+    'nb-master=s'   => \$config{nb_master},
+    'nb-port=i'     => \$config{nb_port},
+    'nb-user=s'     => \$config{nb_user},
+    'nb-pass=s'     => \$config{nb_pass},
+    'kb-config=s'   => \$config{kb_config},
+    'kb-context=s'  => \$config{kb_context},
+    'verbose!'      => \$config{verbose},
+    'help|h'        => sub { pod2usage(0) },
+) or pod2usage(1);
+
+# Validation des paramètres obligatoires
+unless ($config{nb_user} && $config{nb_pass}) {
+    print "ERREUR: Credentials NetBackup requis\n";
+    print "Usage: --nb-user <user> --nb-pass <pass>\n";
+    pod2usage(1);
+}
+
+# Classes et modules
+my $nb = NetBackupAPI->new(%config);
+my $k8s = KubernetesAPI->new(%config);
+
+# ==============================================================================
+# PROGRAMME PRINCIPAL
+# ==============================================================================
+
+sub main {
+    print "\n=== NetBackup to Kubernetes Restore Tool ===\n\n";
+    
+    # Étape 1: Sélectionner le namespace de backup
+    my $backup_namespace = select_backup_namespace();
+    return unless defined $backup_namespace;
+    
+    # Étape 2: Lister et sélectionner un backup
+    my $backup = select_backup($backup_namespace);
+    return unless defined $backup;
+    
+    print "\nBackup sélectionné:\n";
+    print "  ID: $backup->{id}\n";
+    print "  Date: $backup->{date}\n";
+    print "  Taille: $backup->{size}\n\n";
+    
+    # Étape 3: Sélectionner le cluster Kubernetes
+    my $cluster = select_kubernetes_cluster();
+    return unless defined $cluster;
+    
+    print "Cluster Kubernetes sélectionné: $cluster\n\n";
+    
+    # Étape 4: Sélectionner le namespace cible
+    my $target_namespace = select_target_namespace($cluster);
+    return unless defined $target_namespace;
+    
+    print "Namespace cible: $target_namespace\n";
+    print "Création du namespace: " . ($target_namespace->{create} ? "OUI" : "NON") . "\n\n";
+    
+    # Confirmation finale
+    if (confirm_restore($backup, $cluster, $target_namespace)) {
+        perform_restore($backup, $cluster, $target_namespace);
+    } else {
+        print "Restauration annulée.\n";
+    }
+}
+
+# ==============================================================================
+# ÉTAPE 1: Sélectionner le namespace de backup
+# ==============================================================================
+
+sub select_backup_namespace {
+    print "[1/4] Sélection du namespace de backup\n";
+    print "-" x 50 . "\n";
+    
+    my @namespaces = $nb->get_namespaces();
+    
+    unless (@namespaces) {
+        print "ERREUR: Aucun namespace trouvé\n";
+        return undef;
+    }
+    
+    print "Namespaces disponibles:\n";
+    for (my $i = 0; $i < @namespaces; $i++) {
+        printf "  [%d] %s\n", $i + 1, $namespaces[$i];
+    }
+    
+    my $choice = prompt_choice("Sélectionnez un namespace", 1, scalar @namespaces);
+    return $namespaces[$choice - 1];
+}
+
+# ==============================================================================
+# ÉTAPE 2: Lister et sélectionner un backup
+# ==============================================================================
+
+sub select_backup {
+    my ($namespace) = @_;
+    
+    print "\n[2/4] Sélection du backup\n";
+    print "-" x 50 . "\n";
+    print "Chargement des backups pour '$namespace'...\n";
+    
+    my @backups = $nb->get_backups($namespace);
+    
+    unless (@backups) {
+        print "ERREUR: Aucun backup trouvé pour ce namespace\n";
+        return undef;
+    }
+    
+    print "Backups disponibles:\n";
+    for (my $i = 0; $i < @backups; $i++) {
+        my $b = $backups[$i];
+        printf "  [%d] %s - %s (%s)\n", 
+            $i + 1, 
+            $b->{id}, 
+            $b->{date}, 
+            format_size($b->{size});
+    }
+    
+    my $choice = prompt_choice("Sélectionnez un backup", 1, scalar @backups);
+    return $backups[$choice - 1];
+}
+
+# ==============================================================================
+# ÉTAPE 3: Sélectionner le cluster Kubernetes
+# ==============================================================================
+
+sub select_kubernetes_cluster {
+    print "\n[3/4] Sélection du cluster Kubernetes\n";
+    print "-" x 50 . "\n";
+    
+    my @clusters = $k8s->get_clusters();
+    
+    unless (@clusters) {
+        print "ERREUR: Aucun cluster Kubernetes trouvé\n";
+        print "Vérifiez votre configuration kubeconfig: $config{kb_config}\n";
+        return undef;
+    }
+    
+    print "Clusters disponibles:\n";
+    for (my $i = 0; $i < @clusters; $i++) {
+        printf "  [%d] %s\n", $i + 1, $clusters[$i];
+    }
+    
+    my $choice = prompt_choice("Sélectionnez un cluster", 1, scalar @clusters);
+    return $clusters[$choice - 1];
+}
+
+# ==============================================================================
+# ÉTAPE 4: Sélectionner le namespace cible
+# ==============================================================================
+
+sub select_target_namespace {
+    my ($cluster) = @_;
+    
+    print "\n[4/4] Sélection du namespace cible\n";
+    print "-" x 50 . "\n";
+    
+    my @existing_namespaces = $k8s->get_namespaces($cluster);
+    
+    print "Namespaces existants:\n";
+    for (my $i = 0; $i < @existing_namespaces; $i++) {
+        printf "  [%d] %s (existant)\n", $i + 1, $existing_namespaces[$i];
+    }
+    
+    print "  [" . (scalar @existing_namespaces + 1) . "] Créer un nouveau namespace\n";
+    
+    my $choice = prompt_choice(
+        "Sélectionnez ou créez un namespace", 
+        1, 
+        scalar @existing_namespaces + 1
+    );
+    
+    if ($choice <= scalar @existing_namespaces) {
+        return {
+            name   => $existing_namespaces[$choice - 1],
+            create => 0,
+        };
+    } else {
+        my $new_name = prompt_input("Entrez le nom du nouveau namespace");
+        return {
+            name   => $new_name,
+            create => 1,
+        };
+    }
+}
+
+# ==============================================================================
+# Confirmation et exécution
+# ==============================================================================
+
+sub confirm_restore {
+    my ($backup, $cluster, $namespace) = @_;
+    
+    print "\n" . "=" x 50 . "\n";
+    print "CONFIRMATION DE LA RESTAURATION\n";
+    print "=" x 50 . "\n";
+    print "Backup ID:     $backup->{id}\n";
+    print "Date:          $backup->{date}\n";
+    print "Cluster:       $cluster\n";
+    print "Namespace:     $namespace->{name}\n";
+    print "Créer NS:      " . ($namespace->{create} ? "OUI" : "NON") . "\n";
+    print "=" x 50 . "\n";
+    
+    return prompt_yes_no("Confirmer la restauration? (o/n)");
+}
+
+sub perform_restore {
+    my ($backup, $cluster, $namespace) = @_;
+    
+    print "\nDémarrage de la restauration...\n\n";
+    
+    # Créer le namespace s'il n'existe pas
+    if ($namespace->{create}) {
+        print "Création du namespace: $namespace->{name}\n";
+        $k8s->create_namespace($cluster, $namespace->{name})
+            or die "Erreur: Impossible de créer le namespace\n";
+    }
+    
+    # Lancer la restauration
+    print "Restauration du backup: $backup->{id}\n";
+    my $job_id = $nb->restore_backup(
+        backup_id => $backup->{id},
+        cluster   => $cluster,
+        namespace => $namespace->{name},
+    ) or die "Erreur: Impossible de lancer la restauration\n";
+    
+    print "\nTâche de restauration créée: $job_id\n";
+    print "Vous pouvez suivre l'état via:\n";
+    print "  kubectl -n $namespace->{name} get pods\n";
+    print "  kubectl -n $namespace->{name} describe pod/<pod-name>\n";
+}
+
+# ==============================================================================
+# Fonctions utilitaires
+# ==============================================================================
+
+sub prompt_choice {
+    my ($message, $min, $max) = @_;
+    
+    while (1) {
+        print "\n$message [$min-$max]: ";
+        my $choice = <STDIN>;
+        chomp($choice);
+        
+        if ($choice =~ /^\d+$/ && $choice >= $min && $choice <= $max) {
+            return $choice;
+        }
+        print "ERREUR: Veuillez entrer un nombre entre $min et $max\n";
+    }
+}
+
+sub prompt_yes_no {
+    my ($message) = @_;
+    
+    while (1) {
+        print "$message ";
+        my $response = <STDIN>;
+        chomp($response);
+        
+        return 1 if $response =~ /^(o|oui|y|yes)$/i;
+        return 0 if $response =~ /^(n|non|no)$/i;
+        print "Veuillez répondre par 'o' ou 'n'\n";
+    }
+}
+
+sub prompt_input {
+    my ($message) = @_;
+    
+    print "$message: ";
+    my $input = <STDIN>;
+    chomp($input);
+    return $input;
+}
+
+sub format_size {
+    my ($bytes) = @_;
+    
+    return '0 B' unless $bytes;
+    
+    my @units = ('B', 'KB', 'MB', 'GB', 'TB');
+    my $size = $bytes;
+    my $unit_index = 0;
+    
+    while ($size > 1024 && $unit_index < $#units) {
+        $size /= 1024;
+        $unit_index++;
+    }
+    
+    return sprintf("%.2f %s", $size, $units[$unit_index]);
+}
+
+# ==============================================================================
+# CLASSE NetBackupAPI
+# ==============================================================================
+
+package NetBackupAPI;
+
+use strict;
+use warnings;
+use LWP::UserAgent;
+use HTTP::Request;
+use JSON::PP;
+
+sub new {
+    my ($class, %config) = @_;
+    
+    my $self = {
+        master   => $config{nb_master},
+        port     => $config{nb_port},
+        user     => $config{nb_user},
+        pass     => $config{nb_pass},
+        verbose  => $config{verbose},
+        ua       => LWP::UserAgent->new(),
+    };
+    
+    $self->{ua}->timeout(30);
+    $self->{ua}->ssl_opts(verify_hostname => 0);
+    
+    bless $self, $class;
+    return $self;
+}
+
+sub get_namespaces {
+    my ($self) = @_;
+    
+    print "Récupération des namespaces...\n" if $self->{verbose};
+    
+    my $url = "https://$self->{master}:$self->{port}/netbackup/v2/backups?filter=namespaces";
+    my $req = HTTP::Request->new(GET => $url);
+    $req->authorization_basic($self->{user}, $self->{pass});
+    
+    my $resp = $self->{ua}->request($req);
+    
+    unless ($resp->is_success) {
+        warn "ERREUR NetBackup: " . $resp->status_line . "\n";
+        return ();
+    }
+    
+    my $data = eval { JSON::PP::decode_json($resp->content) } or do {
+        warn "ERREUR JSON: $@\n";
+        return ();
+    };
+    
+    my @namespaces;
+    if (ref $data eq 'ARRAY') {
+        @namespaces = map { $_->{namespace} } @{$data};
+    } elsif (ref $data eq 'HASH' && $data->{data}) {
+        @namespaces = map { $_->{namespace} } @{$data->{data}};
+    }
+    
+    return sort { $a cmp $b } @namespaces;
+}
+
+sub get_backups {
+    my ($self, $namespace) = @_;
+    
+    print "Récupération des backups pour $namespace...\n" if $self->{verbose};
+    
+    my $url = "https://$self->{master}:$self->{port}/netbackup/v2/backups?filter=namespace:$namespace";
+    my $req = HTTP::Request->new(GET => $url);
+    $req->authorization_basic($self->{user}, $self->{pass});
+    
+    my $resp = $self->{ua}->request($req);
+    
+    unless ($resp->is_success) {
+        warn "ERREUR NetBackup: " . $resp->status_line . "\n";
+        return ();
+    }
+    
+    my $data = eval { JSON::PP::decode_json($resp->content) } or do {
+        warn "ERREUR JSON: $@\n";
+        return ();
+    };
+    
+    my @backups;
+    if (ref $data eq 'ARRAY') {
+        @backups = @{$data};
+    } elsif (ref $data eq 'HASH' && $data->{data}) {
+        @backups = @{$data->{data}};
+    }
+    
+    return sort { $b->{date} cmp $a->{date} } @backups;
+}
+
+sub restore_backup {
+    my ($self, %params) = @_;
+    
+    my $url = "https://$self->{master}:$self->{port}/netbackup/v2/restore";
+    
+    my $body = JSON::PP::encode_json({
+        backup_id   => $params{backup_id},
+        destination => {
+            cluster   => $params{cluster},
+            namespace => $params{namespace},
+        },
+    });
+    
+    my $req = HTTP::Request->new(POST => $url);
+    $req->authorization_basic($self->{user}, $self->{pass});
+    $req->header('Content-Type' => 'application/json');
+    $req->content($body);
+    
+    my $resp = $self->{ua}->request($req);
+    
+    unless ($resp->is_success) {
+        warn "ERREUR NetBackup: " . $resp->status_line . "\n";
+        warn $resp->content . "\n" if $self->{verbose};
+        return undef;
+    }
+    
+    my $data = eval { JSON::PP::decode_json($resp->content) };
+    return $data->{job_id};
+}
+
+# ==============================================================================
+# CLASSE KubernetesAPI
+# ==============================================================================
+
+package KubernetesAPI;
+
+use strict;
+use warnings;
+use IPC::Run qw(run);
+use JSON::PP;
+
+sub new {
+    my ($class, %config) = @_;
+    
+    my $self = {
+        kubeconfig => $config{kb_config},
+        context    => $config{kb_context},
+        verbose    => $config{verbose},
+    };
+    
+    bless $self, $class;
+    return $self;
+}
+
+sub kubectl {
+    my ($self, @args) = @_;
+    
+    my @cmd = ('kubectl', "--kubeconfig=$self->{kubeconfig}");
+    push @cmd, "--context=$self->{context}" if $self->{context};
+    push @cmd, @args;
+    
+    print "Executing: " . join(' ', @cmd) . "\n" if $self->{verbose};
+    
+    my ($out, $err);
+    run \@cmd, \undef, \$out, \$err or do {
+        warn "ERREUR kubectl: $err\n";
+        return undef;
+    };
+    
+    return $out;
+}
+
+sub get_clusters {
+    my ($self) = @_;
+    
+    my $out = $self->kubectl('config', 'get-contexts', '-o', 'jsonpath={.contexts[*].name}');
+    return unless defined $out;
+    
+    my @clusters = split(/\s+/, $out);
+    return @clusters;
+}
+
+sub get_namespaces {
+    my ($self, $cluster) = @_;
+    
+    my $out = $self->kubectl(
+        '--context', $cluster,
+        'get', 'namespaces',
+        '-o', 'jsonpath={.items[*].metadata.name}'
+    );
+    
+    return unless defined $out;
+    
+    my @namespaces = split(/\s+/, $out);
+    return sort { $a cmp $b } @namespaces;
+}
+
+sub create_namespace {
+    my ($self, $cluster, $namespace) = @_;
+    
+    my $out = $self->kubectl(
+        '--context', $cluster,
+        'create', 'namespace', $namespace
+    );
+    
+    return defined $out;
+}
+
+# Lancer le programme
+main() unless caller();
